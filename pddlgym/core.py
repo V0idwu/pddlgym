@@ -353,6 +353,8 @@ class PDDLEnv(gym.Env):
             type_hierarchy=self.domain.type_hierarchy,
             type_to_parent_types=self.domain.type_to_parent_types)
 
+        self.last_state = None
+
     @staticmethod
     def load_pddl(domain_file, problem_dir, operators_as_actions=False):
         """
@@ -492,7 +494,7 @@ class PDDLEnv(gym.Env):
 
         done = self._is_goal_reached(state)
 
-        reward = self.extrinsic_reward(state, done)
+        reward = self.extrinsic_reward_hanoi(state, done)
         debug_info = self._get_debug_info()
 
         return state, reward, done, debug_info
@@ -529,6 +531,69 @@ class PDDLEnv(gym.Env):
         else:
             reward = 0.
 
+        return reward
+    
+    def obs_wrapper(self, obs):
+        """
+            translate observations of pddlgym to np.array
+        """
+
+        literal_on_peg = []
+        literal_on_disc = []
+
+        observation = np.zeros(9, dtype=int).reshape(3, 3)
+        for literal in obs.literals:
+            if literal.predicate.name == "on":
+                if literal.variables[1].name[:3] == "peg":
+                    literal_on_peg.append(literal)
+                else:
+                    literal_on_disc.append(literal)
+
+        literal_on_disc.sort(key=lambda literal: int(literal.variables[1].name[1:]), reverse=True)
+
+        literals = literal_on_peg + literal_on_disc
+        for literal in literals:
+            if literal.variables[0].name[:1] == "d":
+                disc1_th = int(literal.variables[0].name[1:])
+
+                if literal.variables[1].name[:3] == "peg":
+                    peg_th = int(literal.variables[1].name[3:])
+                    observation[-1][peg_th - 1] = disc1_th
+
+                elif literal.variables[1].name[:1] == "d":
+                    disc2_th = int(literal.variables[1].name[1:])
+                    row_index, col_index = np.where(observation == disc2_th)
+                    observation[row_index.item() - 1][col_index.item()] = disc1_th
+                else:
+                    raise ValueError
+
+        return observation
+
+    def extrinsic_reward_hanoi(self, state, done):
+        # 最终目标完成
+        if done:
+            reward = 100.
+            return reward
+
+        # if self.last_state != state:
+
+        # 小目标完成
+        # obs_array = self.obs_wrapper(state)
+        # if (obs_array[:, -1] == np.array([0,0,3])).all():
+        #     reward = 10.
+        # elif (obs_array[:, -1] == np.array([0,2,3])).all():
+        #     reward = 10
+        # 小目标没完成
+        
+        else:
+            reward = -1.
+        
+        
+        # elif self.last_state == state:
+        #     reward = -5
+
+        # self.last_state == statecxsv
+        
         return reward
 
     def _is_goal_reached(self, state):
