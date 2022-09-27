@@ -15,29 +15,45 @@ Usage example:
 >>> action = env.action_space.sample()
 >>> obs, reward, done, debug_info = env.step(action)
 """
-from pddlgym.parser import PDDLDomainParser, PDDLProblemParser, PDDLParser
-from pddlgym.inference import find_satisfying_assignments, check_goal
-from pddlgym.structs import ground_literal, Literal, State, ProbabilisticEffect, LiteralConjunction, NoChange
-from pddlgym.spaces import LiteralSpace, LiteralSetSpace, LiteralActionSpace
-
 import copy
 import functools
 import glob
 import os
 from itertools import product
+from lib2to3.pgen2 import literals
 
 import gym
-
 import numpy as np
 
+from pddlgym.inference import check_goal, find_satisfying_assignments
+from pddlgym.parser import PDDLDomainParser, PDDLParser, PDDLProblemParser
+from pddlgym.spaces import LiteralActionSpace, LiteralSetSpace, LiteralSpace
+from pddlgym.structs import (
+    Literal,
+    LiteralConjunction,
+    NoChange,
+    ProbabilisticEffect,
+    State,
+    ground_literal,
+)
 
 
 class InvalidAction(Exception):
     """See PDDLEnv docstring"""
+
     pass
 
-def get_successor_state(state, action, domain, raise_error_on_invalid_action=False, 
-                        inference_mode="infer", require_unique_assignment=True, get_all_transitions=False, return_probs=False):
+
+def get_successor_state(
+    state,
+    action,
+    domain,
+    raise_error_on_invalid_action=False,
+    inference_mode="infer",
+    require_unique_assignment=True,
+    get_all_transitions=False,
+    return_probs=False,
+):
     """
     Compute successor state(s) using operators in the domain
 
@@ -56,9 +72,9 @@ def get_successor_state(state, action, domain, raise_error_on_invalid_action=Fal
     -------
     next_state : State
     """
-    selected_operator, assignment = _select_operator(state, action, domain, 
-        inference_mode=inference_mode, 
-        require_unique_assignment=require_unique_assignment)
+    selected_operator, assignment = _select_operator(
+        state, action, domain, inference_mode=inference_mode, require_unique_assignment=require_unique_assignment
+    )
 
     # A ground operator was found; execute the ground effects
     if assignment is not None:
@@ -84,13 +100,28 @@ def get_successor_state(state, action, domain, raise_error_on_invalid_action=Fal
     return state
 
 
-def get_successor_states(state, action, domain, raise_error_on_invalid_action=False,
-                         inference_mode="infer", require_unique_assignment=True, return_probs=False):
-    return get_successor_state(state, action, domain, raise_error_on_invalid_action, inference_mode, require_unique_assignment, get_all_transitions=True, return_probs=return_probs)
+def get_successor_states(
+    state,
+    action,
+    domain,
+    raise_error_on_invalid_action=False,
+    inference_mode="infer",
+    require_unique_assignment=True,
+    return_probs=False,
+):
+    return get_successor_state(
+        state,
+        action,
+        domain,
+        raise_error_on_invalid_action,
+        inference_mode,
+        require_unique_assignment,
+        get_all_transitions=True,
+        return_probs=return_probs,
+    )
 
 
-def _select_operator(state, action, domain, inference_mode="infer",
-                     require_unique_assignment=True):
+def _select_operator(state, action, domain, inference_mode="infer", require_unique_assignment=True):
     """
     Helper for successor generation
     """
@@ -123,7 +154,7 @@ def _select_operator(state, action, domain, inference_mode="infer",
             conds = [action.predicate(*operator.params)] + conds
         # Check whether action is in the preconditions
         action_literal = None
-        for lit in conds: 
+        for lit in conds:
             if lit.predicate == action.predicate:
                 action_literal = lit
                 break
@@ -131,12 +162,15 @@ def _select_operator(state, action, domain, inference_mode="infer",
             continue
         # For proving, consider action variable first
         action_variables = action_literal.variables
-        variable_sort_fn = lambda v : (not v in action_variables, v)
-        assignments = find_satisfying_assignments(kb, conds,
+        variable_sort_fn = lambda v: (not v in action_variables, v)
+        assignments = find_satisfying_assignments(
+            kb,
+            conds,
             variable_sort_fn=variable_sort_fn,
             type_to_parent_types=domain.type_to_parent_types,
             constants=domain.constants,
-            mode=inference_mode)
+            mode=inference_mode,
+        )
         num_assignments = len(assignments)
         if num_assignments > 0:
             if require_unique_assignment:
@@ -147,6 +181,7 @@ def _select_operator(state, action, domain, inference_mode="infer",
 
     return selected_operator, assignment
 
+
 def _check_domain_for_strips(domain):
     """
     Check whether all operators in a domain are STRIPS
@@ -155,6 +190,7 @@ def _check_domain_for_strips(domain):
         if not _check_struct_for_strips(operator.preconds):
             return False
     return True
+
 
 def _check_struct_for_strips(struct):
     """
@@ -185,8 +221,8 @@ def _compute_new_state_from_lifted_effects(lifted_effects, assignments, new_lite
             new_literals.add(effect)
     return new_literals
 
-def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False,
-                   return_probs=False):
+
+def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False, return_probs=False):
     """
     Update a state given lifted operator effects and
     assignments of variables to objects.
@@ -211,10 +247,8 @@ def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False
     for lifted_effect in lifted_effects:
         if isinstance(lifted_effect, ProbabilisticEffect):
             effect_outcomes = lifted_effect.literals
-            probas = dict(zip(lifted_effect.literals,
-                              lifted_effect.probabilities))
+            probas = dict(zip(lifted_effect.literals, lifted_effect.probabilities))
             cur_probabilistic_lifted_effects = []
-
 
             if get_all_transitions:
                 lifted_effects_list = cur_probabilistic_lifted_effects
@@ -222,11 +256,9 @@ def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False
                 lifted_effects_list = determinized_lifted_effects
             sampled_effect = lifted_effect.sample()
 
-
             # If get_all_transitions == False, create list with sampled state only
             # Otherwise, populate it with possible outcomes
-            effects_to_process = [
-                sampled_effect] if not get_all_transitions else effect_outcomes
+            effects_to_process = [sampled_effect] if not get_all_transitions else effect_outcomes
 
             for chosen_effect in effects_to_process:
                 if isinstance(chosen_effect, LiteralConjunction):
@@ -238,8 +270,7 @@ def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False
                     chosen_effect.proba = probas[chosen_effect]
 
             if get_all_transitions:
-                probabilistic_lifted_effects.append(
-                    cur_probabilistic_lifted_effects)
+                probabilistic_lifted_effects.append(cur_probabilistic_lifted_effects)
         else:
             determinized_lifted_effects.append(lifted_effect)
 
@@ -252,8 +283,7 @@ def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False
     # else - get all possible transitions
 
     # Construct combinations of probabilistic effects
-    probabilistic_effects_combinations = list(
-        product(*probabilistic_lifted_effects))
+    probabilistic_effects_combinations = list(product(*probabilistic_lifted_effects))
 
     states_to_probs = {}
     for prob_efs_combination in probabilistic_effects_combinations:
@@ -261,9 +291,10 @@ def _apply_effects(state, lifted_effects, assignments, get_all_transitions=False
         if total_proba == 0:
             continue
         new_prob_literals = set(state.literals)
-        new_determinized_lifted_effects = determinized_lifted_effects + \
-            list(prob_efs_combination)
-        new_prob_literals = _compute_new_state_from_lifted_effects(new_determinized_lifted_effects, assignments, new_prob_literals)
+        new_determinized_lifted_effects = determinized_lifted_effects + list(prob_efs_combination)
+        new_prob_literals = _compute_new_state_from_lifted_effects(
+            new_determinized_lifted_effects, assignments, new_prob_literals
+        )
 
         new_state = state.with_literals(new_prob_literals)
         if new_state in states_to_probs:
@@ -302,10 +333,17 @@ class PDDLEnv(gym.Env):
         Let self.action_space dynamically change on each iteration to
         include only valid actions (must match operator preconditions).
     """
-    def __init__(self, domain_file, problem_dir, render=None, seed=0,
-                 raise_error_on_invalid_action=False,
-                 operators_as_actions=False,
-                 dynamic_action_space=False):
+
+    def __init__(
+        self,
+        domain_file,
+        problem_dir,
+        render=None,
+        seed=0,
+        raise_error_on_invalid_action=False,
+        operators_as_actions=False,
+        dynamic_action_space=False,
+    ):
         self._state = None
         self._domain_file = domain_file
         self._problem_dir = problem_dir
@@ -320,8 +358,7 @@ class PDDLEnv(gym.Env):
         self._problem_idx = None
 
         # Parse the PDDL files
-        self.domain, self.problems = self.load_pddl(domain_file, problem_dir,
-            operators_as_actions=self.operators_as_actions)
+        self.domain, self.problems = self.load_pddl(domain_file, problem_dir, operators_as_actions=self.operators_as_actions)
 
         # Determine if the domain is STRIPS
         self._domain_is_strips = _check_domain_for_strips(self.domain)
@@ -334,24 +371,28 @@ class PDDLEnv(gym.Env):
         if dynamic_action_space:
             if self.domain.operators_as_actions and self._domain_is_strips:
                 self._action_space = LiteralActionSpace(
-                    self.domain, self.action_predicates,
+                    self.domain,
+                    self.action_predicates,
                     type_hierarchy=self.domain.type_hierarchy,
-                    type_to_parent_types=self.domain.type_to_parent_types)
+                    type_to_parent_types=self.domain.type_to_parent_types,
+                )
             else:
                 self._action_space = LiteralSpace(
-                    self.action_predicates, lit_valid_test=self._action_valid_test,
+                    self.action_predicates,
+                    lit_valid_test=self._action_valid_test,
                     type_hierarchy=self.domain.type_hierarchy,
-                    type_to_parent_types=self.domain.type_to_parent_types)
+                    type_to_parent_types=self.domain.type_to_parent_types,
+                )
 
         else:
-            self._action_space = LiteralSpace(self.action_predicates,
-                type_to_parent_types=self.domain.type_to_parent_types)
+            self._action_space = LiteralSpace(self.action_predicates, type_to_parent_types=self.domain.type_to_parent_types)
 
         # Initialize observation space with problem-independent components
         self._observation_space = LiteralSetSpace(
             set(self.domain.predicates.values()) - set(self.action_predicates),
             type_hierarchy=self.domain.type_hierarchy,
-            type_to_parent_types=self.domain.type_to_parent_types)
+            type_to_parent_types=self.domain.type_to_parent_types,
+        )
 
         self.last_state = None
 
@@ -374,14 +415,15 @@ class PDDLEnv(gym.Env):
         domain : PDDLDomainParser
         problems : [ PDDLProblemParser ]
         """
-        domain = PDDLDomainParser(domain_file, 
-            expect_action_preds=(not operators_as_actions),
-            operators_as_actions=operators_as_actions)
+        domain = PDDLDomainParser(
+            domain_file, expect_action_preds=(not operators_as_actions), operators_as_actions=operators_as_actions
+        )
         problems = []
         problem_files = [f for f in glob.glob(os.path.join(problem_dir, "*.pddl"))]
-        for problem_file in sorted(problem_files):
-            problem = PDDLProblemParser(problem_file, domain.domain_name, 
-                domain.types, domain.predicates, domain.actions, domain.constants)
+        for problem_file in sorted(problem_files, key=lambda path: int(os.path.split(path)[1][7:-5])):
+            problem = PDDLProblemParser(
+                problem_file, domain.domain_name, domain.types, domain.predicates, domain.actions, domain.constants
+            )
             problems.append(problem)
         return domain, problems
 
@@ -436,9 +478,7 @@ class PDDLEnv(gym.Env):
             self._problem_idx = self.rng.choice(len(self.problems))
         self._problem = self.problems[self._problem_idx]
 
-        initial_state = State(frozenset(self._problem.initial_state),
-                              frozenset(self._problem.objects),
-                              self._problem.goal)
+        initial_state = State(frozenset(self._problem.initial_state), frozenset(self._problem.objects), self._problem.goal)
         initial_state = self._handle_derived_literals(initial_state)
         self.set_state(initial_state)
 
@@ -454,15 +494,14 @@ class PDDLEnv(gym.Env):
         Contains the problem file and domain file
         for interaction with a planner.
         """
-        info = {'problem_file' : self._problem.problem_fname,
-                'domain_file' : self.domain.domain_fname }
+        info = {"problem_file": self._problem.problem_fname, "domain_file": self.domain.domain_fname}
         return info
 
     def step(self, action):
         """
         Execute an action and update the state.
 
-        Tries to find a ground operator for which the 
+        Tries to find a ground operator for which the
         preconditions hold when this action is taken. If none
         exist, optionally raises InvalidAction. If multiple
         exist, raises an AssertionError, since we assume
@@ -490,6 +529,7 @@ class PDDLEnv(gym.Env):
         return state, reward, done, debug_info
 
     def _get_new_state_info(self, state):
+        last_state = state
         state = self._handle_derived_literals(state)
 
         done = self._is_goal_reached(state)
@@ -500,26 +540,33 @@ class PDDLEnv(gym.Env):
         return state, reward, done, debug_info
 
     def sample_transition(self, action):
-        state = self._get_successor_state(self._state, action, self.domain,
-                                          inference_mode=self._inference_mode,
-                                          raise_error_on_invalid_action=self._raise_error_on_invalid_action)
+        state = self._get_successor_state(
+            self._state,
+            action,
+            self.domain,
+            inference_mode=self._inference_mode,
+            raise_error_on_invalid_action=self._raise_error_on_invalid_action,
+        )
         return self._get_new_state_info(state)
 
     def _get_successor_state(self, *args, **kwargs):
-        """Separated out to allow for overrides in subclasses
-        """
+        """Separated out to allow for overrides in subclasses"""
         return get_successor_state(*args, **kwargs)
 
     def _get_successor_states(self, *args, **kwargs):
-        """Separated out to allow for overrides in subclasses
-        """
+        """Separated out to allow for overrides in subclasses"""
         return get_successor_states(*args, **kwargs)
 
     def get_all_possible_transitions(self, action, return_probs=False):
         assert self.domain.is_probabilistic
-        states = self._get_successor_states(self._state, action, self.domain,
-                                            inference_mode=self._inference_mode,
-                                            raise_error_on_invalid_action=self._raise_error_on_invalid_action, return_probs=return_probs)
+        states = self._get_successor_states(
+            self._state,
+            action,
+            self.domain,
+            inference_mode=self._inference_mode,
+            raise_error_on_invalid_action=self._raise_error_on_invalid_action,
+            return_probs=return_probs,
+        )
         if return_probs:
             return [(self._get_new_state_info(state), prob) for state, prob in states.items()]
 
@@ -527,15 +574,15 @@ class PDDLEnv(gym.Env):
 
     def extrinsic_reward(self, state, done):
         if done:
-            reward = 1.
+            reward = 1.0
         else:
-            reward = 0.
+            reward = 0.0
 
         return reward
-    
+
     def obs_wrapper(self, obs):
         """
-            translate observations of pddlgym to np.array
+        translate observations of pddlgym to np.array
         """
 
         literal_on_peg = []
@@ -572,8 +619,10 @@ class PDDLEnv(gym.Env):
     def extrinsic_reward_hanoi(self, state, done):
         # 最终目标完成
         if done:
-            reward = 100.
-            return reward
+            reward = 100.0
+
+        elif self.get_state().literals == state.literals:
+            reward = -2.0
 
         # if self.last_state != state:
 
@@ -584,16 +633,15 @@ class PDDLEnv(gym.Env):
         # elif (obs_array[:, -1] == np.array([0,2,3])).all():
         #     reward = 10
         # 小目标没完成
-        
+
         else:
-            reward = -1.
-        
-        
+            reward = -1.0
+
         # elif self.last_state == state:
         #     reward = -5
 
         # self.last_state == statecxsv
-        
+
         return reward
 
     def _is_goal_reached(self, state):
@@ -603,8 +651,7 @@ class PDDLEnv(gym.Env):
         return check_goal(state, self._goal)
 
     def _action_valid_test(self, state, action):
-        _, assignment = _select_operator(state, action, self.domain, 
-            inference_mode=self._inference_mode)
+        _, assignment = _select_operator(state, action, self.domain, inference_mode=self._inference_mode)
         return assignment is not None
 
     def render(self, *args, **kwargs):
@@ -624,14 +671,17 @@ class PDDLEnv(gym.Env):
                 if not pred.is_derived:
                     continue
                 assignments = find_satisfying_assignments(
-                    state.literals, pred.body,
+                    state.literals,
+                    pred.body,
                     type_to_parent_types=self.domain.type_to_parent_types,
                     constants=self.domain.constants,
                     mode="prolog",
-                    max_assignment_count=99999)
+                    max_assignment_count=99999,
+                )
                 for assignment in assignments:
-                    objects = [assignment[param_type(param_name)]
-                               for param_name, param_type in zip(pred.param_names, pred.var_types)]
+                    objects = [
+                        assignment[param_type(param_name)] for param_name, param_type in zip(pred.param_names, pred.var_types)
+                    ]
                     derived_literal = pred(*objects)
                     if derived_literal not in state.literals:
                         new_derived_literals.add(derived_literal)
