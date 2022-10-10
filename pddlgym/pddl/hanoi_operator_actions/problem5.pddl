@@ -1,4 +1,4 @@
-(define (problem hanoi2)
+(define (problem hanoi5)
   (:domain hanoi)
   (:objects peg1 peg2 peg3 d1 d2 d3 d4 d5)
   (:init
